@@ -5,33 +5,38 @@
 <div class="card">
   <h2 class="card-title">Upload Attendee List</h2>
   <p style="color: var(--text-muted); margin-bottom: 20px;">
-    Upload a CSV file containing attendee details. The file must include <strong>name</strong> and <strong>email</strong> columns.
+    Upload a CSV file containing attendee details. The file must include <strong>name</strong> and <strong>email</strong> columns.<br>
+    <span style="font-size:0.88rem;">Tip: Column names are case-insensitive. Extra columns are safely ignored.</span>
   </p>
 
   <form method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
     <div class="form-group">
-      <label for="csv_file" class="form-label">Select Attendee CSV File</label>
+      <label for="csv_file" class="form-label">Select Attendee CSV File (.csv)</label>
       <input type="file" id="csv_file" name="csv_file" class="form-control" accept=".csv" required>
     </div>
 
-    <div style="display: flex; gap: 12px;">
-      <button type="submit" class="btn btn-primary">Inspect & Preview CSV</button>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+      <button type="submit" class="btn btn-primary">🔍 Inspect & Preview CSV</button>
       <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
     </div>
   </form>
 </div>
 
-{% if preview_rows is defined and preview_rows %}
+{% if upload_ready and preview_rows %}
 <div class="card">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
     <div>
-      <h3 style="font-size: 1.15rem; font-weight: 700;">CSV Preview (First 10 of {{ total_uploaded_rows }} Attendees)</h3>
-      <p style="color: var(--text-muted); font-size: 0.88rem;">Review the columns before triggering pass generation and automated emails.</p>
+      <h3 style="font-size: 1.15rem; font-weight: 700;">
+        Preview — First {{ preview_rows|length }} of {{ total_uploaded_rows }} Attendees
+      </h3>
+      <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 4px;">
+        Review the data. When you are ready, click the button to generate QR passes and send emails.
+      </p>
     </div>
 
     <form method="POST" action="{{ url_for('generate_passes') }}">
-      <button type="submit" class="btn btn-success" style="font-size: 1rem; padding: 12px 24px;">
-        🚀 Generate and send passes
+      <button type="submit" class="btn btn-success" style="font-size: 1rem; padding: 12px 28px;">
+        🚀 Generate &amp; Send Passes ({{ total_uploaded_rows }})
       </button>
     </form>
   </div>
@@ -43,18 +48,25 @@
           <th>#</th>
           <th>Name</th>
           <th>Email Address</th>
-          <th>Status Preview</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {% for row in preview_rows %}
         <tr>
-          <td>{{ loop.index }}</td>
+          <td style="color: var(--text-muted);">{{ loop.index }}</td>
           <td><strong>{{ row.name }}</strong></td>
           <td>{{ row.email }}</td>
           <td><span class="badge badge-pending">Ready</span></td>
         </tr>
         {% endfor %}
+        {% if total_uploaded_rows > preview_rows|length %}
+        <tr>
+          <td colspan="4" style="text-align:center; color:var(--text-muted); font-size:0.88rem; padding: 14px;">
+            … and {{ total_uploaded_rows - preview_rows|length }} more attendee(s) not shown in preview.
+          </td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>

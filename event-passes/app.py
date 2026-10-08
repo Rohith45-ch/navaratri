@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import re
 import secrets
 import threading
@@ -31,8 +32,11 @@ import mailer
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# In-memory storage for pending CSV uploads and background worker progress
-pending_uploads = {}
+# ---------------------------------------------------------------
+# In-memory store for pending CSV data (keyed by random upload_id)
+# and background job progress.
+# ---------------------------------------------------------------
+pending_uploads = {}   # upload_id -> list of {name, email}
 progress_state = {
     "running": False,
     "sent": 0,
@@ -43,14 +47,18 @@ progress_state = {
 progress_lock = threading.Lock()
 
 
+# ---------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------
+
 def login_required(f):
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated(*args, **kwargs):
         if not session.get("logged_in"):
             flash("Please log in with the organizer password.", "warning")
             return redirect(url_for("login"))
         return f(*args, **kwargs)
-    return decorated_function
+    return decorated
 
 
 @app.context_processor
@@ -58,21 +66,24 @@ def inject_globals():
     return {"config_event_name": EVENT_NAME}
 
 
-# ---------------------------------------------------------
-# AUTHENTICATION ROUTES
-# ---------------------------------------------------------
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+# ---------------------------------------------------------------
+# AUTH
+# ---------------------------------------------------------------
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if session.get("logged_in"):
+        return redirect(url_for("dashboard"))
     if request.method == "POST":
-        submitted_pw = request.form.get("password", "")
-        if submitted_pw == ORGANIZER_PASSWORD:
+        if request.form.get("password", "") == ORGANIZER_PASSWORD:
+            session.clear()
             session["logged_in"] = True
-            session.permanent = True
             flash("Welcome! Logged in as Event Organizer.", "success")
             return redirect(url_for("dashboard"))
-        else:
-            flash("Incorrect organizer password. Please try again.", "danger")
+        flash("Incorrect organizer password. Please try again.", "danger")
     return render_template("login.html")
 
 
@@ -83,44 +94,31 @@ def logout():
     return redirect(url_for("login"))
 
 
-# ---------------------------------------------------------
-# ORGANIZER DASHBOARD & DOWNLOAD
-# ---------------------------------------------------------
+# ---------------------------------------------------------------
+# DASHBOARD
+# ---------------------------------------------------------------
 
 @app.route("/")
 @app.route("/dashboard")
 @login_required
 def dashboard():
     conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) AS c FROM tickets")
-    total = cursor.fetchone()["c"]
-
-    cursor.execute("SELECT COUNT(*) AS c FROM tickets WHERE email_status = 'sent'")
-    sent_emails = cursor.fetchone()["c"]
-
-    cursor.execute("SELECT COUNT(*) AS c FROM tickets WHERE email_status = 'failed'")
-    failed_emails = cursor.fetchone()["c"]
-
-    cursor.execute("SELECT COUNT(*) AS c FROM tickets WHERE used = 1")
-    entered = cursor.fetchone()["c"]
-
-    cursor.execute("SELECT COUNT(*) AS c FROM tickets WHERE used = 0")
-    not_entered = cursor.fetchone()["c"]
-
-    cursor.execute("SELECT * FROM tickets ORDER BY rowid DESC")
-    attendees = cursor.fetchall()
+    cur = conn.cursor()
+    total        = cur.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+    sent_emails  = cur.execute("SELECT COUNT(*) FROM tickets WHERE email_status='sent'").fetchone()[0]
+    failed_emails= cur.execute("SELECT COUNT(*) FROM tickets WHERE email_status='failed'").fetchone()[0]
+    entered      = cur.execute("SELECT COUNT(*) FROM tickets WHERE used=1").fetchone()[0]
+    not_entered  = cur.execute("SELECT COUNT(*) FROM tickets WHERE used=0").fetchone()[0]
+    attendees    = cur.execute("SELECT * FROM tickets ORDER BY rowid DESC").fetchall()
     conn.close()
 
-    stats = {
-        "total": total,
-        "sent_emails": sent_emails,
-        "failed_emails": failed_emails,
-        "entered": entered,
-        "not_entered": not_entered,
-    }
-
+    stats = dict(
+        total=total,
+        sent_emails=sent_emails,
+        failed_emails=failed_emails,
+        entered=entered,
+        not_entered=not_entered,
+    )
     return render_template("dashboard.html", stats=stats, attendees=attendees)
 
 
@@ -128,31 +126,26 @@ def dashboard():
 @login_required
 def download_not_entered():
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, email FROM tickets WHERE used = 0 ORDER BY name COLLATE NOCASE ASC")
-    rows = cursor.fetchall()
+    rows = conn.execute(
+        "SELECT name, email FROM tickets WHERE used=0 ORDER BY name COLLATE NOCASE"
+    ).fetchall()
     conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["name", "email"])
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["name", "email"])
     for r in rows:
-        writer.writerow([r["name"], r["email"]])
-
-    csv_data = output.getvalue()
+        w.writerow([r["name"], r["email"]])
     return Response(
-        csv_data,
+        buf.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=not_entered_attendees.csv"},
     )
 
 
-# ---------------------------------------------------------
-# UPLOAD & PASS GENERATION
-# ---------------------------------------------------------
-
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
+# ---------------------------------------------------------------
+# UPLOAD (Step 1 – preview only, no generation yet)
+# ---------------------------------------------------------------
 
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
@@ -165,108 +158,108 @@ def upload():
 
         try:
             content = file.stream.read().decode("utf-8-sig")
-            reader = csv.DictReader(io.StringIO(content))
         except Exception as e:
-            flash(f"Error reading CSV file: {e}", "danger")
+            flash(f"Could not read file: {e}", "danger")
             return redirect(url_for("upload"))
 
+        reader = csv.DictReader(io.StringIO(content))
         if not reader.fieldnames:
-            flash("Uploaded CSV file appears to be empty.", "danger")
+            flash("The uploaded CSV file is empty.", "danger")
             return redirect(url_for("upload"))
 
-        # Normalize header keys
         header_map = {col.strip().lower(): col for col in reader.fieldnames}
-        name_key = header_map.get("name")
+        name_key  = header_map.get("name")
         email_key = header_map.get("email")
-
         if not name_key or not email_key:
-            flash("CSV validation failed: File must contain 'name' and 'email' columns.", "danger")
+            flash(
+                f"CSV must contain 'name' and 'email' columns. "
+                f"Found: {list(reader.fieldnames)}",
+                "danger",
+            )
             return redirect(url_for("upload"))
 
-        valid_rows = []
-        invalid_rows = 0
-
+        valid_rows, invalid_count = [], 0
         for row in reader:
-            name_val = (row.get(name_key) or "").strip()
-            email_val = (row.get(email_key) or "").strip()
-
-            if not name_val or not email_val:
-                invalid_rows += 1
+            n = (row.get(name_key) or "").strip()
+            e = (row.get(email_key) or "").strip()
+            if not n or not e or not EMAIL_REGEX.match(e):
+                invalid_count += 1
                 continue
-
-            if not EMAIL_REGEX.match(email_val):
-                invalid_rows += 1
-                continue
-
-            valid_rows.append({"name": name_val, "email": email_val})
+            valid_rows.append({"name": n, "email": e})
 
         if not valid_rows:
-            flash("No valid attendee rows found in the uploaded file.", "danger")
+            flash("No valid attendee rows were found in the file.", "danger")
             return redirect(url_for("upload"))
 
-        session_id = session.get("_id", "admin_session")
-        pending_uploads[session_id] = valid_rows
+        # Store full data in server memory keyed by a random upload ID,
+        # keep the ID in the session (safe – no large data in cookie).
+        upload_id = secrets.token_hex(16)
+        pending_uploads[upload_id] = valid_rows
+        session["upload_id"] = upload_id
 
-        if invalid_rows > 0:
-            flash(f"Loaded {len(valid_rows)} valid rows ({invalid_rows} rows skipped due to missing name or invalid email).", "warning")
+        msg = f"Loaded {len(valid_rows)} valid attendee(s)."
+        if invalid_count:
+            msg += f" {invalid_count} row(s) skipped (missing name / bad email)."
+            flash(msg, "warning")
         else:
-            flash(f"Successfully loaded and validated {len(valid_rows)} attendees.", "success")
+            flash(msg, "success")
 
         return render_template(
             "upload.html",
             preview_rows=valid_rows[:10],
             total_uploaded_rows=len(valid_rows),
+            upload_ready=True,
         )
 
-    return render_template("upload.html", preview_rows=None)
+    return render_template("upload.html", preview_rows=None, upload_ready=False)
 
 
-def worker_generate_passes(attendees):
-    """Background thread worker to generate tokens, QR codes, and send emails."""
+# ---------------------------------------------------------------
+# GENERATE PASSES (Step 2 – triggered from upload preview page)
+# ---------------------------------------------------------------
+
+def _worker_generate(attendees):
     global progress_state
-
     conn = get_db()
-    cursor = conn.cursor()
+    cur  = conn.cursor()
 
     for item in attendees:
-        name = item["name"]
-        email = item["email"]
+        name, email = item["name"], item["email"]
 
-        # Check if email is already in database
-        cursor.execute("SELECT 1 FROM tickets WHERE email = ?", (email,))
-        if cursor.fetchone() is not None:
+        # Skip duplicates
+        if cur.execute("SELECT 1 FROM tickets WHERE email=?", (email,)).fetchone():
             with progress_lock:
                 progress_state["skipped"] += 1
             continue
 
         token = secrets.token_urlsafe(24)
-
         try:
-            # Save record as pending
-            cursor.execute(
-                "INSERT INTO tickets (token, name, email, used, used_at, email_status) VALUES (?, ?, ?, 0, NULL, 'pending')",
+            cur.execute(
+                "INSERT INTO tickets (token,name,email,used,used_at,email_status) "
+                "VALUES (?,?,?,0,NULL,'pending')",
                 (token, name, email),
             )
             conn.commit()
 
-            # Create QR image
             qr_path = mailer.generate_qr_image(token)
-
-            # Send email
             mailer.send_pass_email(name, email, token, qr_path)
 
-            cursor.execute("UPDATE tickets SET email_status = 'sent' WHERE token = ?", (token,))
+            cur.execute("UPDATE tickets SET email_status='sent' WHERE token=?", (token,))
             conn.commit()
-
             with progress_lock:
                 progress_state["sent"] += 1
 
-        except Exception as e:
-            cursor.execute("UPDATE tickets SET email_status = 'failed' WHERE token = ?", (token,))
-            conn.commit()
+        except Exception as exc:
+            print(f"[MAILER ERROR] {email}: {exc}")
+            try:
+                cur.execute(
+                    "UPDATE tickets SET email_status='failed' WHERE token=?", (token,)
+                )
+                conn.commit()
+            except Exception:
+                pass
             with progress_lock:
                 progress_state["failed"] += 1
-            print(f"[MAILER ERROR] Failed to send email to {email}: {e}")
 
     conn.close()
     with progress_lock:
@@ -278,12 +271,16 @@ def worker_generate_passes(attendees):
 def generate_passes():
     global progress_state
 
-    session_id = session.get("_id", "admin_session")
-    attendees = pending_uploads.get(session_id, [])
+    upload_id = session.get("upload_id")
+    attendees = pending_uploads.get(upload_id, []) if upload_id else []
 
     if not attendees:
         flash("No pending attendee list found. Please upload a CSV first.", "warning")
         return redirect(url_for("upload"))
+
+    # Clear the pending data from memory so it can't be triggered twice
+    pending_uploads.pop(upload_id, None)
+    session.pop("upload_id", None)
 
     with progress_lock:
         progress_state = {
@@ -294,10 +291,8 @@ def generate_passes():
             "total": len(attendees),
         }
 
-    # Start sending in a background thread so the request never times out
-    thread = threading.Thread(target=worker_generate_passes, args=(attendees,), daemon=True)
-    thread.start()
-
+    t = threading.Thread(target=_worker_generate, args=(attendees,), daemon=True)
+    t.start()
     return redirect(url_for("progress"))
 
 
@@ -305,8 +300,8 @@ def generate_passes():
 @login_required
 def progress():
     with progress_lock:
-        current_progress = dict(progress_state)
-    return render_template("progress.html", progress=current_progress)
+        snap = dict(progress_state)
+    return render_template("progress.html", progress=snap)
 
 
 @app.route("/progress/status")
@@ -316,36 +311,32 @@ def progress_status():
         return jsonify(progress_state)
 
 
-def worker_resend_failed(failed_tickets):
-    """Background worker to retry sending emails to failed attendees."""
-    global progress_state
+# ---------------------------------------------------------------
+# RESEND FAILED
+# ---------------------------------------------------------------
 
+def _worker_resend(failed_tickets):
+    global progress_state
     conn = get_db()
-    cursor = conn.cursor()
+    cur  = conn.cursor()
 
     for item in failed_tickets:
-        token = item["token"]
-        name = item["name"]
-        email = item["email"]
-
+        token, name, email = item["token"], item["name"], item["email"]
         try:
             qr_path = QR_DIR / f"{token}.png"
             if not qr_path.exists():
                 qr_path = mailer.generate_qr_image(token)
-
             mailer.send_pass_email(name, email, token, qr_path)
-
-            cursor.execute("UPDATE tickets SET email_status = 'sent' WHERE token = ?", (token,))
+            cur.execute("UPDATE tickets SET email_status='sent' WHERE token=?", (token,))
             conn.commit()
             with progress_lock:
                 progress_state["sent"] += 1
-
-        except Exception as e:
-            cursor.execute("UPDATE tickets SET email_status = 'failed' WHERE token = ?", (token,))
+        except Exception as exc:
+            print(f"[RESEND ERROR] {email}: {exc}")
+            cur.execute("UPDATE tickets SET email_status='failed' WHERE token=?", (token,))
             conn.commit()
             with progress_lock:
                 progress_state["failed"] += 1
-            print(f"[RESEND ERROR] Failed to resend email to {email}: {e}")
 
     conn.close()
     with progress_lock:
@@ -356,14 +347,13 @@ def worker_resend_failed(failed_tickets):
 @login_required
 def resend_failed():
     global progress_state
-
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT token, name, email FROM tickets WHERE email_status = 'failed'")
-    failed_tickets = [dict(r) for r in cursor.fetchall()]
+    failed = [dict(r) for r in conn.execute(
+        "SELECT token,name,email FROM tickets WHERE email_status='failed'"
+    ).fetchall()]
     conn.close()
 
-    if not failed_tickets:
+    if not failed:
         flash("No failed emails to resend.", "info")
         return redirect(url_for("dashboard"))
 
@@ -373,84 +363,72 @@ def resend_failed():
             "sent": 0,
             "skipped": 0,
             "failed": 0,
-            "total": len(failed_tickets),
+            "total": len(failed),
         }
 
-    thread = threading.Thread(target=worker_resend_failed, args=(failed_tickets,), daemon=True)
-    thread.start()
-
-    flash(f"Started resending {len(failed_tickets)} failed pass(es) in background.", "info")
+    t = threading.Thread(target=_worker_resend, args=(failed,), daemon=True)
+    t.start()
     return redirect(url_for("progress"))
 
 
-# ---------------------------------------------------------
-# GATE VERIFICATION ROUTE (PUBLIC)
-# ---------------------------------------------------------
+# ---------------------------------------------------------------
+# GATE VERIFICATION  (public – no login required)
+# ---------------------------------------------------------------
 
 @app.route("/check/<token>")
 def check_token(token: str):
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
-    cursor = conn.cursor()
+    cur  = conn.cursor()
 
-    # Single atomic update where used is 0
-    cursor.execute(
-        "UPDATE tickets SET used = 1, used_at = ? WHERE token = ? AND used = 0",
-        (now_str, token),
+    cur.execute(
+        "UPDATE tickets SET used=1, used_at=? WHERE token=? AND used=0",
+        (now, token),
     )
-    rows_changed = cursor.rowcount
+    changed = cur.rowcount
     conn.commit()
 
-    if rows_changed == 1:
-        cursor.execute("SELECT name FROM tickets WHERE token = ?", (token,))
-        row = cursor.fetchone()
-        name = row["name"] if row else "Attendee"
+    if changed == 1:
+        row = cur.execute("SELECT name FROM tickets WHERE token=?", (token,)).fetchone()
         conn.close()
-        return (
-            render_template(
-                "verify.html",
-                event_name=EVENT_NAME,
-                status="ALLOWED",
-                icon="✅",
-                name=name,
-                message="Entry granted. Welcome to the event!",
-            ),
-            200,
-        )
-
-    # Check whether the token exists
-    cursor.execute("SELECT name, used_at FROM tickets WHERE token = ?", (token,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if row is not None:
-        used_time = row["used_at"] or "earlier"
-        return (
-            render_template(
-                "verify.html",
-                event_name=EVENT_NAME,
-                status="ALREADY USED",
-                icon="⚠️",
-                name=row["name"],
-                message=f"This pass was already used at {used_time}.",
-            ),
-            409,
-        )
-
-    # Token doesn't exist
-    return (
-        render_template(
+        name = row["name"] if row else "Attendee"
+        return render_template(
             "verify.html",
             event_name=EVENT_NAME,
-            status="INVALID",
-            icon="❌",
-            name=None,
-            message="This ticket token is not found in the system.",
-        ),
-        404,
-    )
+            status="ALLOWED",
+            icon="✅",
+            name=name,
+            message="Entry granted. Welcome to the event!",
+        ), 200
 
+    row = cur.execute(
+        "SELECT name, used_at FROM tickets WHERE token=?", (token,)
+    ).fetchone()
+    conn.close()
+
+    if row:
+        return render_template(
+            "verify.html",
+            event_name=EVENT_NAME,
+            status="ALREADY USED",
+            icon="⚠️",
+            name=row["name"],
+            message=f"This pass was already used at {row['used_at'] or 'an earlier time'}.",
+        ), 409
+
+    return render_template(
+        "verify.html",
+        event_name=EVENT_NAME,
+        status="INVALID",
+        icon="❌",
+        name=None,
+        message="This ticket token is not found in the system.",
+    ), 404
+
+
+# ---------------------------------------------------------------
+# ENTRY POINT
+# ---------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8000, debug=False)
