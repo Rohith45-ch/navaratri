@@ -1,0 +1,23 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+event-entry/venv/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+event-entry/__pycache__/
+
+# SQLite database
+*.db
+*.sqlite3
+event-entry/tickets.db
+
+# Generated QR images and reports
+event-entry/qr/*.png
+event-entry/not_entered.csv
+
+# Environment variables & secrets
+.env
