@@ -1,0 +1,105 @@
+{% extends "layout.html" %}
+{% block title %}Organizer Dashboard{% endblock %}
+
+{% block content %}
+<div class="actions-bar">
+  <div>
+    <h1 style="font-size: 1.75rem; font-weight: 800;">Gate & Passes Overview</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Monitor real-time attendee admissions and email delivery status.</p>
+  </div>
+
+  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+    <a href="{{ url_for('upload') }}" class="btn btn-primary">➕ Upload Attendees</a>
+    {% if stats.failed_emails > 0 %}
+    <form method="POST" action="{{ url_for('resend_failed') }}" style="display: inline;">
+      <button type="submit" class="btn btn-warning">🔄 Resend Failed ({{ stats.failed_emails }})</button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('download_not_entered') }}" class="btn btn-secondary">📥 Download Unentered CSV</a>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Attendees</div>
+    <div class="stat-value primary">{{ stats.total }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Emails Sent</div>
+    <div class="stat-value success">{{ stats.sent_emails }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Failed Emails</div>
+    <div class="stat-value danger">{{ stats.failed_emails }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Entered Gate</div>
+    <div class="stat-value success">{{ stats.entered }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Not Yet Entered</div>
+    <div class="stat-value warning">{{ stats.not_entered }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <h2 class="card-title" style="margin-bottom: 0;">Attendee Roster ({{ attendees|length }})</h2>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Email Status</th>
+          <th>Gate Status</th>
+          <th>Check-In Time</th>
+          <th>Verification Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not attendees %}
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
+            No attendees registered yet. <a href="{{ url_for('upload') }}">Upload a CSV list</a> to get started.
+          </td>
+        </tr>
+        {% else %}
+          {% for a in attendees %}
+          <tr>
+            <td><strong>{{ a.name }}</strong></td>
+            <td>{{ a.email }}</td>
+            <td>
+              {% if a.email_status == 'sent' %}
+                <span class="badge badge-sent">Sent</span>
+              {% elif a.email_status == 'failed' %}
+                <span class="badge badge-failed">Failed</span>
+              {% else %}
+                <span class="badge badge-pending">Pending</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if a.used == 1 %}
+                <span class="badge badge-entered">Entered</span>
+              {% else %}
+                <span class="badge badge-unentered">Not Entered</span>
+              {% endif %}
+            </td>
+            <td style="color: var(--text-muted); font-size: 0.88rem;">
+              {{ a.used_at or '—' }}
+            </td>
+            <td>
+              <a href="{{ url_for('check_token', token=a.token) }}" target="_blank" style="color: var(--primary); font-size: 0.88rem; text-decoration: underline;">
+                Test Gate Scan &rarr;
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

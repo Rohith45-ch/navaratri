@@ -1,0 +1,78 @@
+{% extends "layout.html" %}
+{% block title %}Pass Generation Progress{% endblock %}
+
+{% block content %}
+{% if progress.running %}
+<meta http-equiv="refresh" content="3">
+{% endif %}
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div>
+      <h2 class="card-title" style="margin-bottom: 4px;">Pass Generation & Email Delivery</h2>
+      <p style="color: var(--text-muted); font-size: 0.95rem;">
+        {% if progress.running %}
+          ⏳ Background processing is active... This page auto-refreshes every 3 seconds.
+        {% else %}
+          🎉 Generation process completed!
+        {% endif %}
+      </p>
+    </div>
+
+    <div>
+      {% if not progress.running %}
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Return to Dashboard</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total to Process</div>
+      <div class="stat-value primary">{{ progress.total }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Emails Sent</div>
+      <div class="stat-value success">{{ progress.sent }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Skipped (Duplicate)</div>
+      <div class="stat-value warning">{{ progress.skipped }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value danger">{{ progress.failed }}</div>
+    </div>
+  </div>
+
+  {% if progress.running %}
+  <div style="background: #e2e8f0; border-radius: 9999px; height: 12px; overflow: hidden; margin-bottom: 24px;">
+    {% set pct = (progress.sent + progress.skipped + progress.failed) / (progress.total if progress.total > 0 else 1) * 100 %}
+    <div style="background: var(--primary); height: 100%; width: {{ pct }}%; transition: width 0.4s ease;"></div>
+  </div>
+  <p style="font-size: 0.9rem; color: var(--text-muted); text-align: center;">
+    Processed {{ progress.sent + progress.skipped + progress.failed }} of {{ progress.total }} attendees ({{ "%.1f"|format(pct) }}%)
+  </p>
+  {% else %}
+    {% if progress.failed > 0 %}
+    <div class="alert alert-warning" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+      <div>
+        <strong>Some emails failed to send:</strong> {{ progress.failed }} email(s) encountered network or SMTP delivery issues.
+      </div>
+      <form method="POST" action="{{ url_for('resend_failed') }}">
+        <button type="submit" class="btn btn-warning">🔄 Resend Failed Emails</button>
+      </form>
+    </div>
+    {% else %}
+    <div class="alert alert-success" style="margin-top: 16px;">
+      All attendees processed successfully with zero failures!
+    </div>
+    {% endif %}
+
+    <div style="margin-top: 24px; display: flex; gap: 12px;">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
+      <a href="{{ url_for('upload') }}" class="btn btn-secondary">Upload More Attendees</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

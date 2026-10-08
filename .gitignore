@@ -3,21 +3,26 @@ venv/
 env/
 ENV/
 event-entry/venv/
+event-passes/venv/
 
 # Byte-compiled / optimized files
 __pycache__/
 *.py[cod]
 *$py.class
 event-entry/__pycache__/
+event-passes/__pycache__/
 
 # SQLite database
 *.db
 *.sqlite3
 event-entry/tickets.db
+event-passes/tickets.db
 
 # Generated QR images and reports
 event-entry/qr/*.png
+event-passes/qr/*.png
 event-entry/not_entered.csv
+event-passes/not_entered*.csv
 
 # Environment variables & secrets
 .env

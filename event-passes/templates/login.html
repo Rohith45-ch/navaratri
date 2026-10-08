@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% block title %}Organizer Login{% endblock %}
+
+{% block content %}
+<div style="max-width: 420px; margin: 40px auto;">
+  <div class="card">
+    <h2 class="card-title" style="text-align: center; margin-bottom: 24px;">Organizer Login</h2>
+    <p style="color: var(--text-muted); font-size: 0.95rem; text-align: center; margin-bottom: 24px;">
+      Enter the organizer password to manage attendee passes and gate check-ins.
+    </p>
+
+    <form method="POST" action="{{ url_for('login') }}">
+      <div class="form-group">
+        <label for="password" class="form-label">Organizer Password</label>
+        <input type="password" id="password" name="password" class="form-control" placeholder="Enter password" required autofocus>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Log In</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
