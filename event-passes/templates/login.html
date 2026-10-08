@@ -1,21 +1,28 @@
 {% extends "layout.html" %}
-{% block title %}Organizer Login{% endblock %}
+{% block title %}Organizer Portal Login{% endblock %}
 
 {% block content %}
-<div style="max-width: 420px; margin: 40px auto;">
-  <div class="card">
-    <h2 class="card-title" style="text-align: center; margin-bottom: 24px;">Organizer Login</h2>
-    <p style="color: var(--text-muted); font-size: 0.95rem; text-align: center; margin-bottom: 24px;">
-      Enter the organizer password to manage attendee passes and gate check-ins.
-    </p>
+<div style="max-width: 440px; margin: 60px auto 40px auto;">
+  <div class="card" style="box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 124, 195, 0.15);">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 16px; background: rgba(0, 124, 195, 0.15); border: 1px solid rgba(0, 210, 255, 0.35); font-size: 1.8rem; margin-bottom: 16px; box-shadow: 0 0 20px rgba(0, 163, 224, 0.25);">
+        🔐
+      </div>
+      <h2 class="card-title" style="margin-bottom: 8px;">Organizer Authentication</h2>
+      <p style="color: var(--text-muted); font-size: 0.92rem;">
+        Enter your administrative credentials to manage entry passes, rosters, and gate synchronization.
+      </p>
+    </div>
 
     <form method="POST" action="{{ url_for('login') }}">
       <div class="form-group">
-        <label for="password" class="form-label">Organizer Password</label>
-        <input type="password" id="password" name="password" class="form-control" placeholder="Enter password" required autofocus>
+        <label for="password" class="form-label">Administrative Password</label>
+        <input type="password" id="password" name="password" class="form-control" placeholder="••••••••••••" required autofocus autocomplete="current-password">
       </div>
 
-      <button type="submit" class="btn btn-primary" style="width: 100%;">Log In</button>
+      <button type="submit" class="btn btn-primary" style="width: 100%; padding: 13px; font-size: 1rem;">
+        Sign In to Portal &rarr;
+      </button>
     </form>
   </div>
 </div>

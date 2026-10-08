@@ -1,10 +1,9 @@
 import csv
 import io
-import json
+import logging
 import re
 import secrets
 import threading
-from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
@@ -20,23 +19,22 @@ from flask import (
     url_for,
 )
 
-from config import (
-    EVENT_NAME,
-    ORGANIZER_PASSWORD,
-    QR_DIR,
-    SECRET_KEY,
-    get_db,
-)
+import config
+import db
 import mailer
+import sheets_sync
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = SECRET_KEY
+app.secret_key = config.SECRET_KEY
 
 # ---------------------------------------------------------------
-# In-memory store for pending CSV data (keyed by random upload_id)
-# and background job progress.
+# In-memory store for pending CSV data (keyed by upload_id)
+# and background job progress state
 # ---------------------------------------------------------------
-pending_uploads = {}   # upload_id -> list of {name, email}
+pending_uploads = {}  # upload_id -> list of {name, email}
 progress_state = {
     "running": False,
     "sent": 0,
@@ -46,9 +44,11 @@ progress_state = {
 }
 progress_lock = threading.Lock()
 
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 # ---------------------------------------------------------------
-# HELPERS
+# HELPERS & AUTH
 # ---------------------------------------------------------------
 
 def login_required(f):
@@ -63,14 +63,14 @@ def login_required(f):
 
 @app.context_processor
 def inject_globals():
-    return {"config_event_name": EVENT_NAME}
-
-
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    return {
+        "config_event_name": config.EVENT_NAME,
+        "last_sync_time": sheets_sync.get_last_sync_time(),
+    }
 
 
 # ---------------------------------------------------------------
-# AUTH
+# AUTH ROUTES
 # ---------------------------------------------------------------
 
 @app.route("/login", methods=["GET", "POST"])
@@ -78,7 +78,8 @@ def login():
     if session.get("logged_in"):
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        if request.form.get("password", "") == ORGANIZER_PASSWORD:
+        entered_password = request.form.get("password", "")
+        if entered_password == config.ORGANIZER_PASSWORD:
             session.clear()
             session["logged_in"] = True
             flash("Welcome! Logged in as Event Organizer.", "success")
@@ -102,35 +103,21 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    conn = get_db()
-    cur = conn.cursor()
-    total        = cur.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
-    sent_emails  = cur.execute("SELECT COUNT(*) FROM tickets WHERE email_status='sent'").fetchone()[0]
-    failed_emails= cur.execute("SELECT COUNT(*) FROM tickets WHERE email_status='failed'").fetchone()[0]
-    entered      = cur.execute("SELECT COUNT(*) FROM tickets WHERE used=1").fetchone()[0]
-    not_entered  = cur.execute("SELECT COUNT(*) FROM tickets WHERE used=0").fetchone()[0]
-    attendees    = cur.execute("SELECT * FROM tickets ORDER BY rowid DESC").fetchall()
-    conn.close()
-
-    stats = dict(
-        total=total,
-        sent_emails=sent_emails,
-        failed_emails=failed_emails,
-        entered=entered,
-        not_entered=not_entered,
+    stats = db.get_stats()
+    attendees = db.get_all_tickets()
+    last_sync = sheets_sync.get_last_sync_time()
+    return render_template(
+        "dashboard.html",
+        stats=stats,
+        attendees=attendees,
+        last_sync_time=last_sync,
     )
-    return render_template("dashboard.html", stats=stats, attendees=attendees)
 
 
 @app.route("/download/not-entered")
 @login_required
 def download_not_entered():
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT name, email FROM tickets WHERE used=0 ORDER BY name COLLATE NOCASE"
-    ).fetchall()
-    conn.close()
-
+    rows = db.get_not_entered()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["name", "email"])
@@ -143,8 +130,19 @@ def download_not_entered():
     )
 
 
+@app.route("/sync", methods=["POST"])
+@login_required
+def sync_sheets():
+    success = sheets_sync.sync_to_sheet()
+    if success:
+        flash("Google Sheet successfully synchronized!", "success")
+    else:
+        flash("Google Sheet sync failed. Check secrets/service_account.json and SHEET_ID.", "warning")
+    return redirect(url_for("dashboard"))
+
+
 # ---------------------------------------------------------------
-# UPLOAD (Step 1 – preview only, no generation yet)
+# UPLOAD
 # ---------------------------------------------------------------
 
 @app.route("/upload", methods=["GET", "POST"])
@@ -159,7 +157,7 @@ def upload():
         try:
             content = file.stream.read().decode("utf-8-sig")
         except Exception as e:
-            flash(f"Could not read file: {e}", "danger")
+            flash(f"Could not read CSV file: {e}", "danger")
             return redirect(url_for("upload"))
 
         reader = csv.DictReader(io.StringIO(content))
@@ -168,17 +166,18 @@ def upload():
             return redirect(url_for("upload"))
 
         header_map = {col.strip().lower(): col for col in reader.fieldnames}
-        name_key  = header_map.get("name")
+        name_key = header_map.get("name")
         email_key = header_map.get("email")
+
         if not name_key or not email_key:
             flash(
-                f"CSV must contain 'name' and 'email' columns. "
-                f"Found: {list(reader.fieldnames)}",
+                f"CSV must contain 'name' and 'email' columns. Found: {list(reader.fieldnames)}",
                 "danger",
             )
             return redirect(url_for("upload"))
 
-        valid_rows, invalid_count = [], 0
+        valid_rows = []
+        invalid_count = 0
         for row in reader:
             n = (row.get(name_key) or "").strip()
             e = (row.get(email_key) or "").strip()
@@ -191,15 +190,13 @@ def upload():
             flash("No valid attendee rows were found in the file.", "danger")
             return redirect(url_for("upload"))
 
-        # Store full data in server memory keyed by a random upload ID,
-        # keep the ID in the session (safe – no large data in cookie).
         upload_id = secrets.token_hex(16)
         pending_uploads[upload_id] = valid_rows
         session["upload_id"] = upload_id
 
         msg = f"Loaded {len(valid_rows)} valid attendee(s)."
         if invalid_count:
-            msg += f" {invalid_count} row(s) skipped (missing name / bad email)."
+            msg += f" ({invalid_count} row(s) skipped due to missing name or bad email format)."
             flash(msg, "warning")
         else:
             flash(msg, "success")
@@ -215,55 +212,40 @@ def upload():
 
 
 # ---------------------------------------------------------------
-# GENERATE PASSES (Step 2 – triggered from upload preview page)
+# PASS GENERATION & WORKER
 # ---------------------------------------------------------------
 
 def _worker_generate(attendees):
     global progress_state
-    conn = get_db()
-    cur  = conn.cursor()
 
     for item in attendees:
         name, email = item["name"], item["email"]
 
-        # Skip duplicates
-        if cur.execute("SELECT 1 FROM tickets WHERE email=?", (email,)).fetchone():
+        # Skip existing emails
+        if db.email_exists(email):
             with progress_lock:
                 progress_state["skipped"] += 1
             continue
 
         token = secrets.token_urlsafe(24)
         try:
-            cur.execute(
-                "INSERT INTO tickets (token,name,email,used,used_at,email_status) "
-                "VALUES (?,?,?,0,NULL,'pending')",
-                (token, name, email),
-            )
-            conn.commit()
-
+            db.insert_ticket(token, name, email)
             qr_path = mailer.generate_qr_image(token)
             mailer.send_pass_email(name, email, token, qr_path)
-
-            cur.execute("UPDATE tickets SET email_status='sent' WHERE token=?", (token,))
-            conn.commit()
+            db.set_email_status(token, "sent")
             with progress_lock:
                 progress_state["sent"] += 1
-
         except Exception as exc:
-            print(f"[MAILER ERROR] {email}: {exc}")
-            try:
-                cur.execute(
-                    "UPDATE tickets SET email_status='failed' WHERE token=?", (token,)
-                )
-                conn.commit()
-            except Exception:
-                pass
+            logger.error("Pass generation/send failed for %s: %s", email, exc)
+            db.set_email_status(token, "failed")
             with progress_lock:
                 progress_state["failed"] += 1
 
-    conn.close()
     with progress_lock:
         progress_state["running"] = False
+
+    # Automatically sync to Google Sheet after bulk generation
+    sheets_sync.sync_in_background()
 
 
 @app.route("/generate-passes", methods=["POST"])
@@ -278,7 +260,6 @@ def generate_passes():
         flash("No pending attendee list found. Please upload a CSV first.", "warning")
         return redirect(url_for("upload"))
 
-    # Clear the pending data from memory so it can't be triggered twice
     pending_uploads.pop(upload_id, None)
     session.pop("upload_id", None)
 
@@ -317,41 +298,35 @@ def progress_status():
 
 def _worker_resend(failed_tickets):
     global progress_state
-    conn = get_db()
-    cur  = conn.cursor()
 
     for item in failed_tickets:
         token, name, email = item["token"], item["name"], item["email"]
         try:
-            qr_path = QR_DIR / f"{token}.png"
+            qr_path = config.QR_DIR / f"{token}.png"
             if not qr_path.exists():
                 qr_path = mailer.generate_qr_image(token)
             mailer.send_pass_email(name, email, token, qr_path)
-            cur.execute("UPDATE tickets SET email_status='sent' WHERE token=?", (token,))
-            conn.commit()
+            db.set_email_status(token, "sent")
             with progress_lock:
                 progress_state["sent"] += 1
         except Exception as exc:
-            print(f"[RESEND ERROR] {email}: {exc}")
-            cur.execute("UPDATE tickets SET email_status='failed' WHERE token=?", (token,))
-            conn.commit()
+            logger.error("Resend failed for %s: %s", email, exc)
+            db.set_email_status(token, "failed")
             with progress_lock:
                 progress_state["failed"] += 1
 
-    conn.close()
     with progress_lock:
         progress_state["running"] = False
+
+    sheets_sync.sync_in_background()
 
 
 @app.route("/resend-failed", methods=["POST"])
 @login_required
 def resend_failed():
     global progress_state
-    conn = get_db()
-    failed = [dict(r) for r in conn.execute(
-        "SELECT token,name,email FROM tickets WHERE email_status='failed'"
-    ).fetchall()]
-    conn.close()
+    failed_rows = db.get_failed_tickets()
+    failed = [dict(r) for r in failed_rows]
 
     if not failed:
         flash("No failed emails to resend.", "info")
@@ -372,53 +347,71 @@ def resend_failed():
 
 
 # ---------------------------------------------------------------
-# GATE VERIFICATION  (public – no login required)
+# GATE VERIFICATION (PUBLIC - NO LOGIN)
 # ---------------------------------------------------------------
 
-@app.route("/check/<token>")
+@app.route("/check/<token>", methods=["GET", "POST"])
 def check_token(token: str):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db()
-    cur  = conn.cursor()
+    """
+    Public gate verification endpoint.
+    Sets used=1 and used_at=now if token exists and used=0.
+    Returns:
+      ALLOWED (200) on first scan
+      ALREADY USED (409) if pass was previously verified
+      INVALID (404) if token is unknown
+    """
+    changed, row = db.check_in(token)
 
-    cur.execute(
-        "UPDATE tickets SET used=1, used_at=? WHERE token=? AND used=0",
-        (now, token),
-    )
-    changed = cur.rowcount
-    conn.commit()
+    # Check if client expects JSON (e.g. from /scan fetch)
+    accept_header = request.headers.get("Accept", "")
+    wants_json = "application/json" in accept_header or request.args.get("format") == "json"
 
-    if changed == 1:
-        row = cur.execute("SELECT name FROM tickets WHERE token=?", (token,)).fetchone()
-        conn.close()
-        name = row["name"] if row else "Attendee"
+    if changed and row:
+        sheets_sync.sync_in_background()
+        name = row["name"]
+        if wants_json:
+            return jsonify({
+                "status": "ALLOWED",
+                "name": name,
+                "message": "Entry granted. Welcome to the event!",
+            }), 200
         return render_template(
             "verify.html",
-            event_name=EVENT_NAME,
+            event_name=config.EVENT_NAME,
             status="ALLOWED",
             icon="✅",
             name=name,
             message="Entry granted. Welcome to the event!",
         ), 200
 
-    row = cur.execute(
-        "SELECT name, used_at FROM tickets WHERE token=?", (token,)
-    ).fetchone()
-    conn.close()
-
     if row:
+        name = row["name"]
+        used_at = row["used_at"] or "an earlier time"
+        if wants_json:
+            return jsonify({
+                "status": "ALREADY USED",
+                "name": name,
+                "message": f"This pass was already used at {used_at}.",
+            }), 409
         return render_template(
             "verify.html",
-            event_name=EVENT_NAME,
+            event_name=config.EVENT_NAME,
             status="ALREADY USED",
             icon="⚠️",
-            name=row["name"],
-            message=f"This pass was already used at {row['used_at'] or 'an earlier time'}.",
+            name=name,
+            message=f"This pass was already used at {used_at}.",
         ), 409
+
+    if wants_json:
+        return jsonify({
+            "status": "INVALID",
+            "name": None,
+            "message": "This ticket token is not found in the system.",
+        }), 404
 
     return render_template(
         "verify.html",
-        event_name=EVENT_NAME,
+        event_name=config.EVENT_NAME,
         status="INVALID",
         icon="❌",
         name=None,
@@ -426,8 +419,14 @@ def check_token(token: str):
     ), 404
 
 
+@app.route("/scan")
+def scan_page():
+    """Gate staff QR camera scanner interface."""
+    return render_template("scan.html")
+
+
 # ---------------------------------------------------------------
-# ENTRY POINT
+# APPLICATION ENTRYPOINT
 # ---------------------------------------------------------------
 
 if __name__ == "__main__":

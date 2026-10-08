@@ -1,42 +1,54 @@
 {% extends "layout.html" %}
-{% block title %}Upload Attendees{% endblock %}
+{% block title %}Upload Attendee Roster{% endblock %}
 
 {% block content %}
 <div class="card">
-  <h2 class="card-title">Upload Attendee List</h2>
-  <p style="color: var(--text-muted); margin-bottom: 20px;">
-    Upload a CSV file containing attendee details. The file must include <strong>name</strong> and <strong>email</strong> columns.<br>
-    <span style="font-size:0.88rem;">Tip: Column names are case-insensitive. Extra columns are safely ignored.</span>
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+    <h2 class="card-title" style="margin-bottom: 0;">Upload Attendee Roster</h2>
+    <span class="brand-tag">CSV INGESTION</span>
+  </div>
+  <p style="color: var(--text-muted); margin-bottom: 24px; font-size: 0.95rem;">
+    Ingest a batch CSV list to generate individual single-use QR passes and dispatch confirmation emails.<br>
+    <span style="color: #38bdf8; font-size: 0.88rem;">Required headers: <code>name</code> and <code>email</code> (case-insensitive). Extra columns are safely ignored.</span>
   </p>
 
   <form method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
-    <div class="form-group">
-      <label for="csv_file" class="form-label">Select Attendee CSV File (.csv)</label>
-      <input type="file" id="csv_file" name="csv_file" class="form-control" accept=".csv" required>
+    <div class="form-group" style="background: rgba(3, 10, 22, 0.5); padding: 24px; border-radius: 12px; border: 2px dashed rgba(0, 163, 224, 0.35); text-align: center;">
+      <label for="csv_file" class="form-label" style="font-size: 1.05rem; margin-bottom: 12px; color: #f1f5f9; cursor: pointer;">
+        📁 Choose CSV Roster File
+      </label>
+      <input type="file" id="csv_file" name="csv_file" class="form-control" accept=".csv" required style="max-width: 400px; margin: 0 auto; background: rgba(10, 25, 48, 0.9); cursor: pointer;">
     </div>
 
-    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-      <button type="submit" class="btn btn-primary">🔍 Inspect & Preview CSV</button>
-      <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px;">
+      <button type="submit" class="btn btn-primary">
+        🔍 Parse &amp; Preview Roster
+      </button>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+        Return to Dashboard
+      </a>
     </div>
   </form>
 </div>
 
 {% if upload_ready and preview_rows %}
-<div class="card">
-  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+<div class="card" style="border-color: rgba(0, 210, 255, 0.45); box-shadow: 0 16px 40px -8px rgba(0, 124, 195, 0.25);">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
     <div>
-      <h3 style="font-size: 1.15rem; font-weight: 700;">
-        Preview — First {{ preview_rows|length }} of {{ total_uploaded_rows }} Attendees
-      </h3>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <h3 style="font-size: 1.25rem; font-weight: 700; color: #ffffff;">
+          Roster Preview &bull; {{ total_uploaded_rows }} Attendees Verified
+        </h3>
+        <span class="badge badge-sent">Validated</span>
+      </div>
       <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 4px;">
-        Review the data. When you are ready, click the button to generate QR passes and send emails.
+        Showing first {{ preview_rows|length }} rows. Click below to begin background pass generation and email dispatch.
       </p>
     </div>
 
     <form method="POST" action="{{ url_for('generate_passes') }}">
-      <button type="submit" class="btn btn-success" style="font-size: 1rem; padding: 12px 28px;">
-        🚀 Generate &amp; Send Passes ({{ total_uploaded_rows }})
+      <button type="submit" class="btn btn-success" style="font-size: 1rem; padding: 13px 32px; box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);">
+        🚀 Dispatch Passes ({{ total_uploaded_rows }} Attendees)
       </button>
     </form>
   </div>
@@ -45,25 +57,25 @@
     <table>
       <thead>
         <tr>
-          <th>#</th>
-          <th>Name</th>
-          <th>Email Address</th>
-          <th>Status</th>
+          <th style="width: 60px;">#</th>
+          <th>Attendee Full Name</th>
+          <th>Destination Email Address</th>
+          <th>Validation Status</th>
         </tr>
       </thead>
       <tbody>
         {% for row in preview_rows %}
         <tr>
-          <td style="color: var(--text-muted);">{{ loop.index }}</td>
-          <td><strong>{{ row.name }}</strong></td>
-          <td>{{ row.email }}</td>
-          <td><span class="badge badge-pending">Ready</span></td>
+          <td style="color: var(--text-muted); font-family: monospace;">{{ loop.index }}</td>
+          <td><strong style="color: #ffffff;">{{ row.name }}</strong></td>
+          <td><span style="color: #38bdf8; font-family: monospace; font-size: 0.9rem;">{{ row.email }}</span></td>
+          <td><span class="badge badge-sent">✓ Ready</span></td>
         </tr>
         {% endfor %}
         {% if total_uploaded_rows > preview_rows|length %}
         <tr>
-          <td colspan="4" style="text-align:center; color:var(--text-muted); font-size:0.88rem; padding: 14px;">
-            … and {{ total_uploaded_rows - preview_rows|length }} more attendee(s) not shown in preview.
+          <td colspan="4" style="text-align: center; color: var(--text-muted); font-size: 0.9rem; padding: 16px;">
+            … and {{ total_uploaded_rows - preview_rows|length }} additional attendee records ready for generation.
           </td>
         </tr>
         {% endif %}

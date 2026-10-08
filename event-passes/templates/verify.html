@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>{{ status }} - Gate Verification</title>
+  <title>{{ status }} - Gate Verification &bull; {{ event_name }}</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap">
   <style>
     * {
       box-sizing: border-box;
@@ -11,7 +12,7 @@
       padding: 0;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -21,71 +22,102 @@
       text-align: center;
       color: #ffffff;
       {% if status == 'ALLOWED' %}
-      background: linear-gradient(135deg, #15803d 0%, #16a34a 100%);
+      background: radial-gradient(circle at 50% 30%, #064e3b 0%, #022c22 60%, #011612 100%);
       {% elif status == 'ALREADY USED' %}
-      background: linear-gradient(135deg, #c2410c 0%, #ea580c 100%);
+      background: radial-gradient(circle at 50% 30%, #7c2d12 0%, #431407 60%, #1c0803 100%);
       {% else %}
-      background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%);
+      background: radial-gradient(circle at 50% 30%, #7f1d1d 0%, #450a0a 60%, #1f0404 100%);
       {% endif %}
     }
     .card {
-      background: rgba(0, 0, 0, 0.28);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(10, 25, 48, 0.75);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-radius: 28px;
       padding: 48px 32px;
-      max-width: 520px;
+      max-width: 540px;
       width: 100%;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-      border: 2px solid rgba(255, 255, 255, 0.25);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+      {% if status == 'ALLOWED' %}
+      border: 2px solid rgba(16, 185, 129, 0.5);
+      box-shadow: 0 0 50px rgba(16, 185, 129, 0.25);
+      {% elif status == 'ALREADY USED' %}
+      border: 2px solid rgba(245, 158, 11, 0.5);
+      box-shadow: 0 0 50px rgba(245, 158, 11, 0.25);
+      {% else %}
+      border: 2px solid rgba(239, 68, 68, 0.5);
+      box-shadow: 0 0 50px rgba(239, 68, 68, 0.25);
+      {% endif %}
     }
     .event-badge {
-      font-size: 1.1rem;
-      font-weight: 600;
+      font-size: 0.95rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
-      opacity: 0.9;
-      margin-bottom: 16px;
+      letter-spacing: 2px;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      display: inline-block;
+      margin-bottom: 24px;
     }
     .icon {
       font-size: 5rem;
       line-height: 1;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
     .status-text {
-      font-size: 3.5rem;
+      font-size: 3.6rem;
       font-weight: 900;
-      letter-spacing: 2px;
+      letter-spacing: 1px;
       line-height: 1.1;
-      margin-bottom: 20px;
-      text-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+      margin-bottom: 18px;
+      {% if status == 'ALLOWED' %}
+      color: #34d399;
+      text-shadow: 0 0 30px rgba(52, 211, 153, 0.6);
+      {% elif status == 'ALREADY USED' %}
+      color: #fbbf24;
+      text-shadow: 0 0 30px rgba(251, 191, 36, 0.6);
+      {% else %}
+      color: #f87171;
+      text-shadow: 0 0 30px rgba(248, 113, 113, 0.6);
+      {% endif %}
     }
     .attendee-name {
       font-size: 2.2rem;
       font-weight: 800;
-      background: rgba(255, 255, 255, 0.2);
-      padding: 14px 24px;
-      border-radius: 16px;
-      margin: 16px 0 24px 0;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 16px 24px;
+      border-radius: 18px;
+      margin: 18px 0 22px 0;
       word-break: break-word;
+      color: #ffffff;
     }
     .details {
-      font-size: 1.35rem;
+      font-size: 1.25rem;
       font-weight: 500;
       line-height: 1.5;
-      opacity: 0.95;
+      opacity: 0.9;
+    }
+    .footer-note {
+      margin-top: 28px;
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.5);
+      letter-spacing: 0.5px;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="event-badge">{{ event_name }}</div>
+    <div class="event-badge">{{ event_name }} &bull; GATE CONTROL</div>
     <div class="icon">{{ icon }}</div>
     <h1 class="status-text">{{ status }}</h1>
     {% if name %}
     <div class="attendee-name">{{ name }}</div>
     {% endif %}
     <p class="details">{{ message }}</p>
+    <div class="footer-note">Enterprise Access Verification &bull; Single-Use Pass Validated</div>
   </div>
 </body>
 </html>

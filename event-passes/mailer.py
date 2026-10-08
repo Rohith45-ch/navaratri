@@ -1,24 +1,22 @@
+import logging
 import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
 import qrcode
 
-from config import (
-    BASE_URL,
-    EVENT_NAME,
-    QR_DIR,
-    SENDER_EMAIL,
-    SENDER_PASSWORD,
-    SMTP_HOST,
-    SMTP_PORT,
-)
+import config
+
+logger = logging.getLogger(__name__)
 
 
 def generate_qr_image(token: str) -> Path:
-    """Generate high-contrast QR code pointing to /check/<token> and save to qr/<token>.png."""
-    check_url = f"{BASE_URL}/check/{token}"
-    qr_path = QR_DIR / f"{token}.png"
+    """
+    Generate a high-contrast QR code pointing to BASE_URL/check/<token>
+    and save to qr/<token>.png. Returns the Path.
+    """
+    check_url = f"{config.BASE_URL}/check/{token}"
+    qr_path = config.QR_DIR / f"{token}.png"
 
     qr = qrcode.QRCode(
         version=1,
@@ -34,17 +32,21 @@ def generate_qr_image(token: str) -> Path:
 
 
 def send_pass_email(name: str, email: str, token: str, qr_path: Path) -> None:
-    """Send entry ticket pass with single-use warning and attached QR image."""
-    check_url = f"{BASE_URL}/check/{token}"
+    """
+    Send entry pass email with event name in subject, greeting using name,
+    explicit single-use warning, and the QR code image attached.
+    """
+    check_url = f"{config.BASE_URL}/check/{token}"
+    sender_addr = config.SENDER_EMAIL or "noreply@eventpasses.local"
 
     msg = EmailMessage()
-    msg["Subject"] = f"Your Entry Pass - {EVENT_NAME}"
-    msg["From"] = SENDER_EMAIL or "noreply@eventpasses.local"
+    msg["Subject"] = f"Your Entry Pass - {config.EVENT_NAME}"
+    msg["From"] = sender_addr
     msg["To"] = email
 
     text_body = f"""Hello {name},
 
-Here is your official single-use entry pass for {EVENT_NAME}.
+Here is your official single-use entry pass for {config.EVENT_NAME}.
 
 IMPORTANT NOTICE:
 - This QR code pass works ONLY ONCE.
@@ -55,7 +57,7 @@ Please find your QR entry pass attached to this email. You can present this code
 Verification Link:
 {check_url}
 
-We look forward to seeing you at {EVENT_NAME}!
+We look forward to seeing you at {config.EVENT_NAME}!
 """
 
     html_body = f"""<!DOCTYPE html>
@@ -63,16 +65,16 @@ We look forward to seeing you at {EVENT_NAME}!
 <head>
   <meta charset="utf-8">
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1f2937; line-height: 1.5; }}
-    .card {{ max-width: 560px; margin: 20px auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }}
-    .title {{ font-size: 20px; font-weight: 700; color: #111827; margin-bottom: 8px; }}
-    .alert {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 16px 0; border-radius: 4px; font-size: 14px; color: #92400e; }}
-    .url-box {{ word-break: break-all; font-size: 13px; color: #4b5563; background: #f3f4f6; padding: 10px; border-radius: 6px; margin: 14px 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1f2937; line-height: 1.5; margin: 0; padding: 20px; background-color: #f9fafb; }}
+    .card {{ max-width: 560px; margin: 0 auto; padding: 32px; border: 1px solid #e5e7eb; border-radius: 16px; background: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }}
+    .title {{ font-size: 22px; font-weight: 800; color: #111827; margin-bottom: 12px; }}
+    .alert {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 14px 16px; margin: 20px 0; border-radius: 6px; font-size: 14px; color: #92400e; font-weight: 500; }}
+    .url-box {{ word-break: break-all; font-size: 13px; color: #4b5563; background: #f3f4f6; padding: 12px; border-radius: 8px; margin: 18px 0; }}
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="title">{EVENT_NAME}</div>
+    <div class="title">{config.EVENT_NAME}</div>
     <p>Hello <strong>{name}</strong>,</p>
     <p>Thank you for registering! Your official gate entry pass is ready.</p>
     <div class="alert">
@@ -101,21 +103,20 @@ We look forward to seeing you at {EVENT_NAME}!
         filename=f"ticket_{token}.png",
     )
 
-    # Port 465 uses SSL directly (Gmail standard)
-    if SMTP_PORT == 465:
-        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+    if not config.SENDER_PASSWORD:
+        raise ValueError("SMTP_PASSWORD is not configured in environment variables.")
+
+    if config.SMTP_PORT == 465:
+        server = smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, timeout=20)
     else:
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        server = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=20)
         server.ehlo()
-        try:
-            if server.has_extn("STARTTLS"):
-                server.starttls()
-                server.ehlo()
-        except smtplib.SMTPNotSupportedError:
-            pass
+        if server.has_extn("STARTTLS"):
+            server.starttls()
+            server.ehlo()
 
-    if SENDER_PASSWORD:
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-
-    server.send_message(msg)
-    server.quit()
+    try:
+        server.login(config.SENDER_EMAIL, config.SENDER_PASSWORD)
+        server.send_message(msg)
+    finally:
+        server.quit()

@@ -5,31 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Event Passes{% endblock %} - {{ config_event_name }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎫</text></svg>">
 </head>
 <body>
-  <nav class="navbar">
-    <a href="{{ url_for('dashboard') }}" class="navbar-brand">🎫 {{ config_event_name }}</a>
-    <div class="navbar-links">
-      {% if session.get('logged_in') %}
-        <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
-        <a href="{{ url_for('upload') }}" class="nav-link">Upload Attendees</a>
-        <a href="{{ url_for('logout') }}" class="nav-link">Log Out</a>
-      {% else %}
-        <a href="{{ url_for('login') }}" class="nav-link">Organizer Login</a>
-      {% endif %}
-    </div>
-  </nav>
+  <div class="navbar-wrapper">
+    <div class="navbar-beam"></div>
+    <nav class="navbar">
+      <a href="{{ url_for('dashboard') }}" class="navbar-brand">
+        <span class="brand-dot"></span>
+        <span>{{ config_event_name }}</span>
+        <span class="brand-tag">PASS PORTAL</span>
+      </a>
+      <div class="navbar-links">
+        <a href="{{ url_for('scan_page') }}" target="_blank" class="nav-link nav-scanner-btn">📷 Gate Scanner</a>
+        {% if session.get('logged_in') %}
+          <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+          <a href="{{ url_for('upload') }}" class="nav-link">Upload Attendees</a>
+          <a href="{{ url_for('logout') }}" class="nav-link">Log Out</a>
+        {% else %}
+          <a href="{{ url_for('login') }}" class="nav-link">Organizer Login</a>
+        {% endif %}
+      </div>
+    </nav>
+  </div>
 
   <main class="container">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="alert alert-{{ category }}">{{ message }}</div>
+          <div class="alert alert-{{ category }}">
+            <span>{{ message }}</span>
+          </div>
         {% endfor %}
       {% endif %}
     {% endwith %}
 
     {% block content %}{% endblock %}
   </main>
+
+  <footer>
+    <div>{{ config_event_name }} &bull; Enterprise Event Access &amp; Gate Verification Infrastructure</div>
+  </footer>
 </body>
 </html>

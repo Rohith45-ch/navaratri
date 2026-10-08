@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Gate QR Scanner &bull; {{ config_event_name }}</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&display=swap">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #030a16;
+      background-image: radial-gradient(circle at 50% 0%, #0a2144 0%, #030a16 70%);
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px;
+    }
+    header {
+      width: 100%;
+      max-width: 500px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(0, 163, 224, 0.25);
+    }
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #00d2ff;
+      box-shadow: 0 0 10px #00d2ff;
+      display: inline-block;
+    }
+    .back-link {
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 0.88rem;
+      font-weight: 600;
+      background: rgba(0, 124, 195, 0.15);
+      border: 1px solid rgba(0, 163, 224, 0.3);
+      padding: 7px 14px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+    }
+    .back-link:hover {
+      background: rgba(0, 124, 195, 0.3);
+      color: #ffffff;
+    }
+    #reader-container {
+      width: 100%;
+      max-width: 500px;
+      position: relative;
+      background: #000;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 2px solid rgba(0, 163, 224, 0.35);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 24px rgba(0, 124, 195, 0.2);
+      min-height: 340px;
+    }
+    #reader {
+      width: 100%;
+    }
+    /* Full-screen Scanner Result Overlay */
+    #result-overlay {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 28px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: all 0.25s ease;
+    }
+    #result-overlay.ALLOWED {
+      background: rgba(6, 78, 59, 0.94);
+      display: flex;
+    }
+    #result-overlay.ALREADY_USED {
+      background: rgba(124, 45, 18, 0.94);
+      display: flex;
+    }
+    #result-overlay.INVALID {
+      background: rgba(127, 29, 29, 0.94);
+      display: flex;
+    }
+    .res-icon {
+      font-size: 5rem;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+    .res-status {
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+      text-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .res-name {
+      font-size: 2.1rem;
+      font-weight: 800;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 12px 24px;
+      border-radius: 14px;
+      margin-bottom: 14px;
+      word-break: break-word;
+      max-width: 90%;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }
+    .res-message {
+      font-size: 1.2rem;
+      font-weight: 500;
+      opacity: 0.95;
+    }
+    .scanner-controls {
+      width: 100%;
+      max-width: 500px;
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+    }
+    button {
+      flex: 1;
+      padding: 13px;
+      background: linear-gradient(135deg, #007cc3 0%, #00a3e0 100%);
+      color: #fff;
+      border: 1px solid rgba(0, 210, 255, 0.4);
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 124, 195, 0.35);
+      transition: all 0.2s ease;
+    }
+    button:active {
+      transform: scale(0.98);
+    }
+    .manual-box {
+      width: 100%;
+      max-width: 500px;
+      margin-top: 20px;
+      background: rgba(9, 23, 46, 0.75);
+      backdrop-filter: blur(12px);
+      padding: 20px;
+      border-radius: 14px;
+      border: 1px solid rgba(0, 163, 224, 0.22);
+    }
+    .manual-box h3 {
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+    }
+    .manual-form {
+      display: flex;
+      gap: 10px;
+    }
+    .manual-input {
+      flex: 1;
+      padding: 12px 16px;
+      background: rgba(3, 10, 22, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+      font-family: inherit;
+    }
+    .manual-input:focus {
+      border-color: #00d2ff;
+      box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.25);
+    }
+    .manual-btn {
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .camera-error {
+      display: none;
+      background: rgba(127, 29, 29, 0.4);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fecaca;
+      padding: 16px;
+      border-radius: 12px;
+      margin-top: 14px;
+      width: 100%;
+      max-width: 500px;
+      font-size: 0.92rem;
+      text-align: center;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand-title">
+      <span class="brand-dot"></span>
+      <span>{{ config_event_name }}</span>
+      <span style="font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; background: rgba(0, 124, 195, 0.2); color: #38bdf8; border: 1px solid rgba(0, 163, 224, 0.3);">SCANNER</span>
+    </div>
+    <a href="/dashboard" class="back-link">Portal Dashboard &rarr;</a>
+  </header>
+
+  <div id="reader-container">
+    <div id="reader"></div>
+
+    <div id="result-overlay">
+      <div id="res-icon" class="res-icon"></div>
+      <div id="res-status" class="res-status"></div>
+      <div id="res-name" class="res-name"></div>
+      <div id="res-message" class="res-message"></div>
+    </div>
+  </div>
+
+  <div id="camera-error" class="camera-error">
+    <strong>Camera Access Denied or Insecure Context:</strong><br>
+    Please ensure camera permission is granted in your browser. Mobile phone browsers require HTTPS (or localhost) for camera access. You can use the manual token entry box below.
+  </div>
+
+  <div class="scanner-controls">
+    <button id="switch-cam-btn" type="button">🔄 Switch Camera</button>
+  </div>
+
+  <div class="manual-box">
+    <h3>Manual Token Fallback</h3>
+    <form id="manual-form" class="manual-form" onsubmit="event.preventDefault(); submitManualToken();">
+      <input type="text" id="manual-token" class="manual-input" placeholder="Paste or type ticket token" autocomplete="off" autocorrect="off">
+      <button type="submit" class="manual-btn">Verify Pass</button>
+    </form>
+  </div>
+
+  <script>
+    let html5QrCode = null;
+    let currentCameraIndex = 0;
+    let availableCameras = [];
+    let isProcessing = false;
+    let lastScannedToken = null;
+    let lastScannedTime = 0;
+
+    const overlay = document.getElementById('result-overlay');
+    const resIcon = document.getElementById('res-icon');
+    const resStatus = document.getElementById('res-status');
+    const resName = document.getElementById('res-name');
+    const resMessage = document.getElementById('res-message');
+    const camError = document.getElementById('camera-error');
+
+    function extractToken(decodedText) {
+      if (!decodedText) return '';
+      decodedText = decodedText.trim();
+      const match = decodedText.match(/\/check\/([A-Za-z0-9_\-]+)/);
+      if (match && match[1]) {
+        return match[1];
+      }
+      const parts = decodedText.split('/');
+      return parts[parts.length - 1];
+    }
+
+    async function verifyToken(token) {
+      if (!token) return;
+
+      const now = Date.now();
+      if (token === lastScannedToken && (now - lastScannedTime) < 5000) {
+        return;
+      }
+
+      if (isProcessing) return;
+      isProcessing = true;
+      lastScannedToken = token;
+      lastScannedTime = now;
+
+      try {
+        const resp = await fetch(`/check/${encodeURIComponent(token)}`, {
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+
+        let data = null;
+        try {
+          data = await resp.json();
+        } catch (e) {
+          data = {
+            status: resp.status === 200 ? 'ALLOWED' : (resp.status === 409 ? 'ALREADY USED' : 'INVALID'),
+            message: resp.statusText
+          };
+        }
+
+        displayResult(data.status, data.name, data.message);
+      } catch (err) {
+        displayResult('INVALID', null, 'Network connection error');
+      } finally {
+        setTimeout(() => {
+          hideResult();
+          isProcessing = false;
+        }, 3000);
+      }
+    }
+
+    function displayResult(status, name, message) {
+      overlay.className = '';
+      if (status === 'ALLOWED') {
+        overlay.classList.add('ALLOWED');
+        resIcon.textContent = '✅';
+        resStatus.textContent = 'ALLOWED';
+      } else if (status === 'ALREADY USED') {
+        overlay.classList.add('ALREADY_USED');
+        resIcon.textContent = '⚠️';
+        resStatus.textContent = 'ALREADY USED';
+      } else {
+        overlay.classList.add('INVALID');
+        resIcon.textContent = '❌';
+        resStatus.textContent = 'INVALID';
+      }
+
+      if (name) {
+        resName.textContent = name;
+        resName.style.display = 'block';
+      } else {
+        resName.style.display = 'none';
+      }
+
+      resMessage.textContent = message || '';
+    }
+
+    function hideResult() {
+      overlay.className = '';
+      overlay.style.display = 'none';
+    }
+
+    function submitManualToken() {
+      const input = document.getElementById('manual-token');
+      const val = input.value.trim();
+      if (!val) return;
+      const token = extractToken(val);
+      input.value = '';
+      verifyToken(token);
+    }
+
+    async function startScanner() {
+      html5QrCode = new Html5Qrcode("reader");
+
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          availableCameras = devices;
+          let rearIdx = devices.findIndex(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear'));
+          currentCameraIndex = rearIdx >= 0 ? rearIdx : 0;
+          await launchCamera(availableCameras[currentCameraIndex].id);
+        } else {
+          await launchFacingMode();
+        }
+      } catch (err) {
+        console.warn("Camera init failed:", err);
+        launchFacingMode();
+      }
+    }
+
+    async function launchCamera(cameraId) {
+      try {
+        await html5QrCode.start(
+          cameraId,
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          (decodedText) => {
+            const token = extractToken(decodedText);
+            verifyToken(token);
+          },
+          (errorMessage) => {}
+        );
+        camError.style.display = 'none';
+      } catch (err) {
+        camError.style.display = 'block';
+      }
+    }
+
+    async function launchFacingMode() {
+      try {
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          (decodedText) => {
+            const token = extractToken(decodedText);
+            verifyToken(token);
+          },
+          (errorMessage) => {}
+        );
+        camError.style.display = 'none';
+      } catch (err) {
+        camError.style.display = 'block';
+      }
+    }
+
+    document.getElementById('switch-cam-btn').addEventListener('click', async () => {
+      if (!availableCameras || availableCameras.length < 2) {
+        alert("Only one camera detected on this device.");
+        return;
+      }
+      try {
+        await html5QrCode.stop();
+        currentCameraIndex = (currentCameraIndex + 1) % availableCameras.length;
+        await launchCamera(availableCameras[currentCameraIndex].id);
+      } catch (e) {
+        console.error(e);
+      }
+    });
+
+    window.addEventListener('load', () => {
+      startScanner();
+    });
+  </script>
+</body>
+</html>

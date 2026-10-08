@@ -1,98 +1,144 @@
 {% extends "layout.html" %}
-{% block title %}Organizer Dashboard{% endblock %}
+{% block title %}Executive Dashboard{% endblock %}
 
 {% block content %}
 <div class="actions-bar">
   <div>
-    <h1 style="font-size: 1.75rem; font-weight: 800;">Gate & Passes Overview</h1>
-    <p style="color: var(--text-muted); font-size: 0.95rem;">Monitor real-time attendee admissions and email delivery status.</p>
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+      <h1 style="font-size: 1.85rem; font-weight: 800; letter-spacing: -0.5px;">Gate &amp; Passes Overview</h1>
+      <span class="brand-tag">LIVE MONITORED</span>
+    </div>
+    <p style="color: var(--text-muted); font-size: 0.94rem;">
+      Real-time attendee admissions, email delivery verification, and Google Sheet synchronization.
+      {% if last_sync_time %}
+        <span style="display: block; margin-top: 4px; color: #34d399; font-weight: 600; font-size: 0.88rem;">
+          ✓ Google Sheet Cloud Mirror Active &bull; Synced: {{ last_sync_time }}
+        </span>
+      {% endif %}
+    </p>
   </div>
 
-  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-    <a href="{{ url_for('upload') }}" class="btn btn-primary">➕ Upload Attendees</a>
-    {% if stats.failed_emails > 0 %}
+  <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+    <a href="{{ url_for('scan_page') }}" target="_blank" class="btn btn-primary" style="box-shadow: 0 0 16px rgba(0, 210, 255, 0.4);">
+      📷 Open Gate Scanner
+    </a>
+    <a href="{{ url_for('upload') }}" class="btn btn-secondary">
+      ➕ Upload CSV
+    </a>
+    <form method="POST" action="{{ url_for('sync_sheets') }}" style="display: inline;">
+      <button type="submit" class="btn btn-secondary">
+        📊 Sync Google Sheet
+      </button>
+    </form>
+    {% if stats.failed > 0 %}
     <form method="POST" action="{{ url_for('resend_failed') }}" style="display: inline;">
-      <button type="submit" class="btn btn-warning">🔄 Resend Failed ({{ stats.failed_emails }})</button>
+      <button type="submit" class="btn btn-warning">
+        🔄 Resend Failed ({{ stats.failed }})
+      </button>
     </form>
     {% endif %}
-    <a href="{{ url_for('download_not_entered') }}" class="btn btn-secondary">📥 Download Unentered CSV</a>
+    <a href="{{ url_for('download_not_entered') }}" class="btn btn-secondary">
+      📥 Export Unchecked CSV
+    </a>
   </div>
 </div>
 
 <div class="stats-grid">
   <div class="stat-card">
-    <div class="stat-label">Total Attendees</div>
+    <div class="stat-label">
+      <span>👥</span> Total Registered
+    </div>
     <div class="stat-value primary">{{ stats.total }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Emails Sent</div>
-    <div class="stat-value success">{{ stats.sent_emails }}</div>
+    <div class="stat-label">
+      <span>✉️</span> Passes Dispatched
+    </div>
+    <div class="stat-value success">{{ stats.sent }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Failed Emails</div>
-    <div class="stat-value danger">{{ stats.failed_emails }}</div>
+    <div class="stat-label">
+      <span>⚠️</span> Delivery Issues
+    </div>
+    <div class="stat-value danger">{{ stats.failed }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Entered Gate</div>
+    <div class="stat-label">
+      <span>✅</span> Gate Admissions
+    </div>
     <div class="stat-value success">{{ stats.entered }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Not Yet Entered</div>
+    <div class="stat-label">
+      <span>⏳</span> Awaiting Entry
+    </div>
     <div class="stat-value warning">{{ stats.not_entered }}</div>
   </div>
 </div>
 
 <div class="card">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-    <h2 class="card-title" style="margin-bottom: 0;">Attendee Roster ({{ attendees|length }})</h2>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+    <div>
+      <h2 class="card-title" style="margin-bottom: 2px;">Registered Attendee Directory</h2>
+      <p style="color: var(--text-muted); font-size: 0.88rem;">Showing {{ attendees|length }} total credentials issued</p>
+    </div>
+    <div>
+      <a href="{{ url_for('download_not_entered') }}" style="color: #38bdf8; font-size: 0.88rem; text-decoration: none; font-weight: 600;">
+        Download Unchecked Attendees List &darr;
+      </a>
+    </div>
   </div>
 
   <div class="table-container">
     <table>
       <thead>
         <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Email Status</th>
+          <th>Attendee Name</th>
+          <th>Contact Email</th>
+          <th>Pass Delivery</th>
           <th>Gate Status</th>
-          <th>Check-In Time</th>
-          <th>Verification Action</th>
+          <th>Admission Timestamp</th>
+          <th>Gate Verification</th>
         </tr>
       </thead>
       <tbody>
         {% if not attendees %}
         <tr>
-          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
-            No attendees registered yet. <a href="{{ url_for('upload') }}">Upload a CSV list</a> to get started.
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 48px;">
+            No attendees found in roster. <a href="{{ url_for('upload') }}" style="color: #38bdf8; font-weight: 600;">Upload a CSV roster</a> to dispatch passes.
           </td>
         </tr>
         {% else %}
           {% for a in attendees %}
           <tr>
-            <td><strong>{{ a.name }}</strong></td>
-            <td>{{ a.email }}</td>
+            <td>
+              <div style="font-weight: 700; color: #ffffff;">{{ a.name }}</div>
+            </td>
+            <td>
+              <span style="color: #94a3b8; font-family: monospace; font-size: 0.88rem;">{{ a.email }}</span>
+            </td>
             <td>
               {% if a.email_status == 'sent' %}
-                <span class="badge badge-sent">Sent</span>
+                <span class="badge badge-sent">✓ Sent</span>
               {% elif a.email_status == 'failed' %}
-                <span class="badge badge-failed">Failed</span>
+                <span class="badge badge-failed">&times; Failed</span>
               {% else %}
-                <span class="badge badge-pending">Pending</span>
+                <span class="badge badge-pending">&bull; Pending</span>
               {% endif %}
             </td>
             <td>
               {% if a.used == 1 %}
-                <span class="badge badge-entered">Entered</span>
+                <span class="badge badge-entered">✓ Admitted</span>
               {% else %}
-                <span class="badge badge-unentered">Not Entered</span>
+                <span class="badge badge-unentered">&bull; Not Entered</span>
               {% endif %}
             </td>
-            <td style="color: var(--text-muted); font-size: 0.88rem;">
+            <td style="color: var(--text-muted); font-size: 0.85rem; font-family: monospace;">
               {{ a.used_at or '—' }}
             </td>
             <td>
-              <a href="{{ url_for('check_token', token=a.token) }}" target="_blank" style="color: var(--primary); font-size: 0.88rem; text-decoration: underline;">
-                Test Gate Scan &rarr;
+              <a href="{{ url_for('check_token', token=a.token) }}" target="_blank" style="color: #38bdf8; font-size: 0.86rem; text-decoration: none; font-weight: 600; padding: 4px 10px; border-radius: 6px; background: rgba(0, 124, 195, 0.15); border: 1px solid rgba(0, 163, 224, 0.3);">
+                Test Check &rarr;
               </a>
             </td>
           </tr>
